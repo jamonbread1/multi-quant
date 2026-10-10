@@ -1,0 +1,5 @@
+cfg,K,filter,signal_days,eligible_days,signal_rate,n_full,n_is,n_oos,win_full,mean_net_full,mean_net_is,mean_net_oos,mean_gross_oos,C1_random_gross_oos,C2_time_gross_oos,mean_net_oos_stress,full_end_u,full_cagr,full_mdd_real,oos_end_u,oos_cagr,oos_mdd_real,P1,P2,P3,P4,pass
+O1,1,False,2457,2473,0.994,2457,1450,1007,0.337,-0.016,0.035,-0.091,0.069,0.07,0.003,-0.151,1.37,-0.366,-0.995,3.98,-0.518,-0.877,False,False,False,False,False
+O2,4,False,2327,2473,0.941,2327,1368,959,0.412,0.017,0.057,-0.04,0.12,0.092,0.166,-0.1,5.2,-0.228,-0.982,8.56,-0.364,-0.805,False,True,False,False,False
+O3,1,True,1175,2473,0.475,1175,684,491,0.369,-0.126,-0.169,-0.064,0.096,0.018,-0.003,-0.124,0.79,-0.42,-0.977,11.67,-0.29,-0.653,False,True,False,True,False
+O4,4,True,1076,2473,0.435,1076,613,463,0.435,0.045,0.092,-0.019,0.141,0.106,0.206,-0.079,14.09,-0.107,-0.889,17.16,-0.183,-0.68,False,True,False,True,False
