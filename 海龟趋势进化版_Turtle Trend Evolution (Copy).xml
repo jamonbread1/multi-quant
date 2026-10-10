@@ -1,0 +1,410 @@
+<LANG>
+5
+</LANG>
+<TYPE>
+0
+</TYPE>
+<CODE>
+/*backtest
+start: 2025-01-01 00:00:00
+end: 2025-12-02 08:00:00
+period: 1d
+basePeriod: 1d
+exchanges: [{"eid":"Futures_Binance","currency":"ETH_USDT"}]
+*/
+
+//@version=6
+strategy("Grok/Claude Turtle Trend Pro Strategy (HA)", 
+         shorttitle="🐢 Turtle HA", 
+         overlay=true, 
+         initial_capital=10000,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=10,
+         commission_type=strategy.commission.percent,
+         commission_value=0.075,
+         slippage=2,
+         pyramiding=0,
+         max_bars_back=500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ║ TURTLE TREND PRO STRATEGY (HEIKIN ASHI ENHANCED)                           ║
+// ║ Based on Richard Dennis's Turtle Trading Rules                             ║
+// ║ Enhanced with Heikin Ashi Smoothing & Neural Fusion Pro Styling            ║
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// INPUT GROUPS
+// ═══════════════════════════════════════════════════════════
+groupEntry      = "Entry Settings (Donchian Breakouts)"
+groupExit       = "Exit Settings"
+groupFilters    = "Signal Filters"
+groupHA         = "Heikin Ashi Settings"
+groupDisplay    = "Display Settings"
+
+// ── ENTRY SETTINGS (Donchian Channel Breakouts) ───────────────────────────────
+entryLength     = input.int(20, "Entry Breakout Period", minval=5, maxval=100, group=groupEntry, tooltip="Original Turtle System 1 used 20 days")
+entryLengthLong = input.int(55, "Long-Term Entry Period", minval=20, maxval=200, group=groupEntry, tooltip="Original Turtle System 2 used 55 days")
+useSystem2      = input.bool(false, "Use System 2 (55-period)", group=groupEntry, tooltip="System 2 catches bigger trends but fewer trades")
+
+// ── EXIT SETTINGS ─────────────────────────────────────────────────────────────
+exitLength      = input.int(15, "Exit Period (System 1)", minval=3, maxval=50, group=groupExit, tooltip="Exit on opposite breakout for position exits")
+exitLengthLong  = input.int(20, "Exit Period (System 2)", minval=5, maxval=100, group=groupExit)
+atrPeriod       = input.int(20, "ATR Period", minval=5, maxval=50, group=groupExit)
+atrMultiplier   = input.float(2.0, "ATR Stop Multiplier", minval=0.5, maxval=5.0, step=0.5, group=groupExit, tooltip="Original Turtles used 2x ATR")
+useAtrStop      = input.bool(true, "Use ATR Stop Loss", group=groupExit)
+
+// ── SIGNAL FILTERS ────────────────────────────────────────────────────────────
+useTrendFilter  = input.bool(false, "Use Trend MA Filter", group=groupFilters, tooltip="Only trade in direction of major trend (off by default)")
+maLength        = input.int(200, "Trend MA Length", minval=10, maxval=500, group=groupFilters, tooltip="Adjustable MA length for trend filter")
+maType          = input.string("EMA", "MA Type", options=["SMA", "EMA"], group=groupFilters)
+useAdxFilter    = input.bool(true, "Require ADX Trending", group=groupFilters)
+adxLength       = input.int(14, "ADX Length", minval=5, maxval=30, group=groupFilters)
+adxThreshold    = input.int(20, "ADX Threshold", minval=10, maxval=40, group=groupFilters)
+useRsiFilter    = input.bool(false, "Use RSI Filter", group=groupFilters)
+rsiLength       = input.int(14, "RSI Length", minval=5, maxval=30, group=groupFilters)
+rsiOversold     = input.int(30, "RSI Oversold", minval=10, maxval=50, group=groupFilters)
+rsiOverbought   = input.int(70, "RSI Overbought", minval=50, maxval=90, group=groupFilters)
+useVolumeFilter = input.bool(false, "Require Volume Surge", group=groupFilters)
+volumePeriod    = input.int(20, "Volume Average Period", minval=5, maxval=50, group=groupFilters)
+volumeMultiple  = input.float(1.5, "Volume Surge Multiplier", minval=1.0, maxval=3.0, step=0.1, group=groupFilters)
+
+// ── HEIKIN ASHI SETTINGS ──────────────────────────────────────────────────────
+useHACalc       = input.bool(true, "Use Heikin Ashi Calculations", group=groupHA, tooltip="Apply HA smoothing to breakout detection")
+showHACandles   = input.bool(true, "Display Heikin Ashi Candles", group=groupHA, tooltip="Visually show HA candles on chart")
+cooldownPeriod  = input.int(5, "Signal Cooldown (Bars)", minval=1, maxval=20, group=groupHA, tooltip="Number of bars to wait after a trade before allowing new signals")
+
+// ── DISPLAY SETTINGS ──────────────────────────────────────────────────────────
+showChannels    = input.bool(true, "Show Donchian Channels", group=groupDisplay)
+showExitChannels = input.bool(true, "Show Exit Channels", group=groupDisplay)
+showMA          = input.bool(false, "Show Trend MA", group=groupDisplay, tooltip="Display the trend MA on chart (off by default)")
+showCloud       = input.bool(true, "Show Channel Cloud", group=groupDisplay)
+showBackground  = input.bool(true, "Show Regime Background", group=groupDisplay)
+showTable       = input.bool(true, "Show Info Panel", group=groupDisplay)
+showLabels      = input.bool(true, "Show Entry/Exit Labels", group=groupDisplay)
+cloudOpacity    = input.int(90, "Cloud Opacity", minval=50, maxval=95, group=groupDisplay)
+bgOpacity       = input.int(92, "Background Opacity", minval=80, maxval=98, group=groupDisplay)
+
+// ═══════════════════════════════════════════════════════════
+// HEIKIN ASHI CALCULATIONS
+// ═══════════════════════════════════════════════════════════
+
+// Calculate Heikin Ashi values
+var float haOpen = na
+haClose = (open + high + low + close) / 4
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
+haHigh = math.max(high, haOpen, haClose)
+haLow = math.min(low, haOpen, haClose)
+
+// Select which price data to use for calculations
+calcHigh = useHACalc ? haHigh : high
+calcLow = useHACalc ? haLow : low
+calcClose = useHACalc ? haClose : close
+calcOpen = useHACalc ? haOpen : open
+
+// ═══════════════════════════════════════════════════════════
+// DONCHIAN CHANNEL CALCULATIONS
+// ═══════════════════════════════════════════════════════════
+
+// Select entry/exit periods based on system
+activeEntryLen = useSystem2 ? entryLengthLong : entryLength
+activeExitLen = useSystem2 ? exitLengthLong : exitLength
+
+// Donchian Channel for Entry (use [1] to avoid repainting)
+// Using HA values for smoother breakout detection
+entryHighest = ta.highest(calcHigh, activeEntryLen)[1]
+entryLowest = ta.lowest(calcLow, activeEntryLen)[1]
+entryMid = (entryHighest + entryLowest) / 2
+
+// Donchian Channel for Exit
+exitLowest = ta.lowest(calcLow, activeExitLen)[1]
+exitHighest = ta.highest(calcHigh, activeExitLen)[1]
+
+// ATR for stops (using regular prices for accurate volatility)
+atr = ta.atr(atrPeriod)
+atrPercent = atr / close * 100
+
+// ATR Percentile for volatility assessment
+atrPercentile = ta.percentrank(atr, 100)
+
+// Trend Filter MA (can use HA close for smoother trend)
+trendMA = maType == "EMA" ? ta.ema(calcClose, maLength) : ta.sma(calcClose, maLength)
+isUptrend = calcClose > trendMA
+isDowntrend = calcClose < trendMA
+maSlope = trendMA - trendMA[1]
+maSlopeUp = maSlope > 0
+maSlopeDown = maSlope < 0
+
+// ADX Filter
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+adxSmoothed = ta.ema(adx, 3)
+isTrending = adxSmoothed > adxThreshold
+
+// RSI Filter
+rsi = ta.rsi(calcClose, rsiLength)
+rsiOversoldZone = rsi < rsiOversold
+rsiOverboughtZone = rsi > rsiOverbought
+
+// Volume Filter
+avgVolume = ta.sma(volume, volumePeriod)
+volumeSurge = volume > avgVolume * volumeMultiple
+
+// OBV for trend confirmation
+obv = ta.obv
+obvSma = ta.sma(obv, 20)
+obvBullish = obv > obvSma
+obvBearish = obv < obvSma
+
+// ═══════════════════════════════════════════════════════════
+// TREND STRENGTH METER (0-100%)
+// ═══════════════════════════════════════════════════════════
+
+adxStrength = math.min(adxSmoothed / 50 * 100, 100)
+priceVsMa = math.abs(calcClose - trendMA) / trendMA * 100
+maStrength = math.min(priceVsMa * 10, 100)
+donchianRange = entryHighest - entryLowest
+priceInChannel = donchianRange > 0 ? (calcClose - entryLowest) / donchianRange * 100 : 50
+channelStrength = isUptrend ? priceInChannel : (100 - priceInChannel)
+diSpread = math.abs(diPlus - diMinus)
+diStrength = math.min(diSpread * 2, 100)
+
+trendStrength = (adxStrength * 0.40) + (maStrength * 0.25) + (channelStrength * 0.20) + (diStrength * 0.15)
+trendStrength := math.min(math.max(trendStrength, 0), 100)
+
+// ═══════════════════════════════════════════════════════════
+// BREAKOUT DETECTION (Using HA or Regular prices)
+// ═══════════════════════════════════════════════════════════
+
+longBreakout = calcHigh > entryHighest
+shortBreakout = calcLow < entryLowest
+longExitBreakout = calcLow < exitLowest
+shortExitBreakout = calcHigh > exitHighest
+
+// ═══════════════════════════════════════════════════════════
+// SIGNAL CONDITIONS
+// ═══════════════════════════════════════════════════════════
+
+// Cooldown tracking
+var int lastTradeBar = 0
+cooldownMet = bar_index - lastTradeBar >= cooldownPeriod
+
+// Apply filters
+trendLongOK = useTrendFilter ? (isUptrend and maSlopeUp) : true
+trendShortOK = useTrendFilter ? (isDowntrend and maSlopeDown) : true
+adxOK = useAdxFilter ? isTrending : true
+rsiLongOK = useRsiFilter ? rsiOversoldZone : true
+rsiShortOK = useRsiFilter ? rsiOverboughtZone : true
+volumeOK = useVolumeFilter ? volumeSurge : true
+
+// Entry conditions (with cooldown)
+longCondition = longBreakout and trendLongOK and adxOK and rsiLongOK and volumeOK and cooldownMet
+shortCondition = shortBreakout and trendShortOK and adxOK and rsiShortOK and volumeOK and cooldownMet
+
+// Exit conditions
+exitLongCondition = longExitBreakout
+exitShortCondition = shortExitBreakout
+
+// ═══════════════════════════════════════════════════════════
+// REGIME CLASSIFICATION
+// ═══════════════════════════════════════════════════════════
+
+isBull = isUptrend and diPlus > diMinus and obvBullish and isTrending
+isBear = isDowntrend and diMinus > diPlus and obvBearish and isTrending
+isNeutral = not isBull and not isBear
+
+// ═══════════════════════════════════════════════════════════
+// STRATEGY EXECUTION
+// ═══════════════════════════════════════════════════════════
+
+// Calculate stop loss levels (using regular close for actual order placement)
+longStopLoss = useAtrStop ? close - (atr * atrMultiplier) : exitLowest
+shortStopLoss = useAtrStop ? close + (atr * atrMultiplier) : exitHighest
+
+// Long Entry
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long)
+    lastTradeBar := bar_index
+    if showLabels
+        label.new(bar_index, low - atr * 0.5, "🐢 LONG\n" + str.tostring(close, "#.##"), 
+                  style=label.style_label_up, color=color.new(#00FF00, 10), 
+                  size=size.small, textcolor=color.white)
+
+// Short Entry
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short)
+    lastTradeBar := bar_index
+    if showLabels
+        label.new(bar_index, high + atr * 0.5, "🐢 SHORT\n" + str.tostring(close, "#.##"), 
+                  style=label.style_label_down, color=color.new(#FF0000, 10), 
+                  size=size.small, textcolor=color.white)
+
+// Exit Long
+if strategy.position_size > 0 and exitLongCondition
+    strategy.close("Long", comment="Exit Long")
+    if showLabels
+        label.new(bar_index, high + atr * 0.3, "EXIT", 
+                  style=label.style_label_down, color=color.new(#FFA500, 20), 
+                  size=size.tiny, textcolor=color.white)
+
+// Exit Short
+if strategy.position_size < 0 and exitShortCondition
+    strategy.close("Short", comment="Exit Short")
+    if showLabels
+        label.new(bar_index, low - atr * 0.3, "EXIT", 
+                  style=label.style_label_up, color=color.new(#FFA500, 20), 
+                  size=size.tiny, textcolor=color.white)
+
+// ATR Stop Loss
+if useAtrStop
+    if strategy.position_size > 0
+        strategy.exit("Long SL", "Long", stop=longStopLoss)
+    if strategy.position_size < 0
+        strategy.exit("Short SL", "Short", stop=shortStopLoss)
+
+// ═══════════════════════════════════════════════════════════
+// HEIKIN ASHI CANDLE VISUALIZATION
+// ═══════════════════════════════════════════════════════════
+
+// Determine HA candle colors
+haIsBullish = haClose > haOpen
+haColor = haIsBullish ? #00FF00 : #FF0000
+haWickColor = haIsBullish ? #00AA00 : #AA0000
+
+// Plot HA candles using plotcandle
+plotcandle(showHACandles ? haOpen : na, 
+           showHACandles ? haHigh : na, 
+           showHACandles ? haLow : na, 
+           showHACandles ? haClose : na, 
+           title="Heikin Ashi Candles",
+           color=haColor, 
+           wickcolor=haWickColor, 
+           bordercolor=haColor)
+
+// ═══════════════════════════════════════════════════════════
+// VISUALIZATION - DONCHIAN CHANNELS
+// ═══════════════════════════════════════════════════════════
+
+upperColor = isBull ? color.new(#00FF00, 30) : isBear ? color.new(#FF0000, 30) : color.new(#FFFF00, 30)
+lowerColor = isBull ? color.new(#00FF00, 30) : isBear ? color.new(#FF0000, 30) : color.new(#FFFF00, 30)
+midColor = isBull ? color.new(#00FF00, 60) : isBear ? color.new(#FF0000, 60) : color.new(#FFFF00, 60)
+
+pUpper = plot(showChannels ? entryHighest : na, "Entry High", color=upperColor, linewidth=2)
+pLower = plot(showChannels ? entryLowest : na, "Entry Low", color=lowerColor, linewidth=2)
+plot(showChannels ? entryMid : na, "Entry Mid", color=midColor, linewidth=1, style=plot.style_circles)
+
+cloudCol = isBull ? color.new(#00FF00, cloudOpacity) : isBear ? color.new(#FF0000, cloudOpacity) : color.new(#FFFF00, cloudOpacity)
+fill(pUpper, pLower, color=showCloud ? cloudCol : na, title="Channel Cloud")
+
+plot(showExitChannels ? exitLowest : na, "Exit Low (Longs)", color=color.new(#00FF00, 50), linewidth=1, style=plot.style_cross)
+plot(showExitChannels ? exitHighest : na, "Exit High (Shorts)", color=color.new(#FF0000, 50), linewidth=1, style=plot.style_cross)
+
+maPlotColor = isUptrend ? color.new(#00FF00, 20) : color.new(#FF0000, 20)
+plot(showMA ? trendMA : na, "Trend MA", color=maPlotColor, linewidth=3)
+
+// ═══════════════════════════════════════════════════════════
+// BACKGROUND COLORING
+// ═══════════════════════════════════════════════════════════
+
+bgColor = isBull ? color.new(#00FF00, bgOpacity) : isBear ? color.new(#FF0000, bgOpacity) : color.new(#FFFFFF, bgOpacity)
+bgcolor(showBackground ? bgColor : na)
+
+// ═══════════════════════════════════════════════════════════
+// INFO TABLE (Neural Fusion Pro Style)
+// ═══════════════════════════════════════════════════════════
+
+var table infoPanel = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 85), border_width=1, frame_color=color.gray, frame_width=1)
+leftBg = color.new(color.gray, 70)
+
+if showTable
+    // Clear and rebuild table on every bar to ensure visibility
+    table.clear(infoPanel, 0, 0, 1, 11)
+    
+    // Header
+    table.cell(infoPanel, 0, 0, "🐢 TURTLE", bgcolor=color.new(#2962ff, 30), text_color=color.white)
+    table.cell(infoPanel, 1, 0, "STATUS", bgcolor=color.new(#2962ff, 30), text_color=color.white)
+    
+    // System Type
+    systemText = useSystem2 ? "System 2 (55)" : "System 1 (20)"
+    systemBg = useSystem2 ? color.new(color.purple, 60) : color.new(color.blue, 60)
+    table.cell(infoPanel, 0, 1, "System", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 1, systemText, bgcolor=systemBg, text_color=color.white)
+    
+    // Candle Mode
+    candleText = useHACalc ? "Heikin Ashi" : "Standard"
+    candleBg = useHACalc ? color.new(#9C27B0, 50) : color.new(color.gray, 60)
+    table.cell(infoPanel, 0, 2, "Candles", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 2, candleText, bgcolor=candleBg, text_color=color.white)
+    
+    // Regime
+    regimeText = isBull ? "BULLISH" : isBear ? "BEARISH" : "NEUTRAL"
+    regimeBg = isBull ? color.new(#00FF00, 50) : isBear ? color.new(#FF0000, 50) : color.new(color.gray, 60)
+    table.cell(infoPanel, 0, 3, "Regime", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 3, regimeText, bgcolor=regimeBg, text_color=color.white)
+    
+    // Market State
+    marketText = isTrending ? "TRENDING" : "RANGING"
+    marketBg = isTrending ? color.new(#4D88FF, 50) : color.new(color.orange, 50)
+    table.cell(infoPanel, 0, 4, "Market", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 4, marketText, bgcolor=marketBg, text_color=color.white)
+    
+    // ADX
+    adxBgColor = adxSmoothed < 15 ? color.white : adxSmoothed <= 25 ? color.orange : color.green
+    adxTextColor = adxSmoothed < 15 ? color.black : color.white
+    table.cell(infoPanel, 0, 5, "ADX", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 5, str.tostring(adxSmoothed, "#.#"), bgcolor=adxBgColor, text_color=adxTextColor)
+    
+    // Volatility
+    volBg = atrPercentile < 30 ? color.new(color.green, 50) : atrPercentile > 70 ? color.new(color.red, 50) : color.new(color.orange, 50)
+    table.cell(infoPanel, 0, 6, "Volatility", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 6, str.tostring(atrPercentile, "#") + "%", bgcolor=volBg, text_color=color.white)
+    
+    // RSI
+    rsiBg = rsi < 30 ? color.new(color.green, 50) : rsi > 70 ? color.new(color.red, 50) : color.new(color.gray, 60)
+    table.cell(infoPanel, 0, 7, "RSI", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 7, str.tostring(rsi, "#.#"), bgcolor=rsiBg, text_color=color.white)
+    
+    // Breakout High
+    table.cell(infoPanel, 0, 8, "Break High", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 8, str.tostring(entryHighest, "#.##"), bgcolor=color.new(#00FF00, 60), text_color=color.white)
+    
+    // Breakout Low
+    table.cell(infoPanel, 0, 9, "Break Low", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 9, str.tostring(entryLowest, "#.##"), bgcolor=color.new(#FF0000, 60), text_color=color.white)
+    
+    // Trend Strength
+    trendStrengthBg = trendStrength < 25 ? color.gray : trendStrength < 50 ? color.yellow : trendStrength < 75 ? color.orange : color.green
+    trendStrengthTextColor = trendStrength < 25 ? color.white : trendStrength >= 75 ? color.white : color.black
+    table.cell(infoPanel, 0, 10, "Trend Str", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 10, str.tostring(trendStrength, "#") + "%", bgcolor=trendStrengthBg, text_color=trendStrengthTextColor)
+    
+    // Position
+    posText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    posBg = strategy.position_size > 0 ? color.new(color.green, 50) : strategy.position_size < 0 ? color.new(color.red, 50) : color.new(color.gray, 70)
+    table.cell(infoPanel, 0, 11, "Position", bgcolor=leftBg, text_color=color.white)
+    table.cell(infoPanel, 1, 11, posText, bgcolor=posBg, text_color=color.white)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ║ TURTLE TREND PRO STRATEGY (HA) - QUICK REFERENCE                           ║
+// ║                                                                             ║
+// ║ Heikin Ashi Enhancement:                                                    ║
+// ║ • Smoothed candle calculations reduce noise                                 ║
+// ║ • Breakout detection uses HA high/low for cleaner signals                  ║
+// ║ • Visual HA candles show trend direction clearly                           ║
+// ║ • Toggle between HA and standard calculations                              ║
+// ║                                                                             ║
+// ║ Original Turtle Rules (Preserved):                                          ║
+// ║ • System 1: Enter on 20-period breakout, exit on 15-period opposite        ║
+// ║ • System 2: Enter on 55-period breakout, exit on 20-period opposite        ║
+// ║ • Stop Loss: 2x ATR from entry                                             ║
+// ║                                                                             ║
+// ║ Enhanced Features:                                                          ║
+// ║ • Optional Trend MA filter (adjustable length, off by default)             ║
+// ║ • ADX filter (avoid choppy markets)                                        ║
+// ║ • RSI filter option (overbought/oversold confirmation)                     ║
+// ║ • Volume surge filter option                                               ║
+// ║ • Neural Fusion Pro styling with regime detection                          ║
+// ══════════════════════════════════════════════════════════════════════════════
+
+</CODE>
+<TIME>
+2026-10-11 02:20:30
+</TIME>
