@@ -291,8 +291,9 @@ def stats(trades, eq, dts, start_ts, end_ts):
                 avg_trade_pct_of_equity=round(float(tr.pnl_net.mean() / INITIAL_CAPITAL * 100), 3) if n else np.nan)
 
 
-def main():
-    df = pd.read_csv(os.path.join(REPO, "ETH-USDT-SWAP_1D.csv"))
+def main(tf="1D"):
+    src = {"1D": "ETH-USDT-SWAP_1D.csv", "1H": "ETH-USDT-SWAP_1H.csv"}[tf]
+    df = pd.read_csv(os.path.join(REPO, src))
     df["dt"] = pd.to_datetime(df["datetime"].str.replace(r"\+00:00$", "", regex=True))
     df = df.sort_values("dt").drop_duplicates("dt").reset_index(drop=True)
     ind = indicators(df)
@@ -309,12 +310,14 @@ def main():
         s["window"] = label
         results.append(s)
         tr = trades[pd.to_datetime(trades.exit_time) >= pd.Timestamp(start)] if len(trades) else trades
-        tr.to_csv(os.path.join(HERE, f"pine_turtle_trades_{end}_v1_0.csv"), index=False)
+        tr.to_csv(os.path.join(HERE, f"pine_turtle_trades_{tf}_{end}_v1_0.csv"), index=False)
     out = pd.DataFrame(results)
-    out.to_csv(os.path.join(HERE, "pine_turtle_replica_v1_0.csv"), index=False)
+    out["tf"] = tf
+    out.to_csv(os.path.join(HERE, "pine_turtle_replica_v1_0.csv" if tf == "1D" else f"pine_turtle_replica_{tf}_v1_0.csv"), index=False)
     pd.set_option("display.width", 250); pd.set_option("display.max_columns", 30)
     print(out.T.to_string())
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1] if len(sys.argv) > 1 else "1D")
