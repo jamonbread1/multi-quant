@@ -96,7 +96,9 @@ def want_series(h, l, c, adx, n, m, adx_min):
 
 
 def run(df, don_n=48, don_exit=None, adx_min=15, stop_mult=STOP_MULT, lev=LEV, start_u=START_U,
-        fee_side=FEE_SIDE, slip_side=0.0, fund=True):
+        fee_side=FEE_SIDE, slip_side=0.0, fund=True, allow=None):
+    """allow: 可选, 长度=bar 数的数组, 取值 +1(仅允许多) / -1(仅允许空) / 0(禁止开仓) / 2(不限制).
+    按信号根 cl 的值过滤 want: 不允许的方向视为 want=0 (已有仓位则在该根信号离场)."""
     """df: 列 dt(UTC naive), open, high, low, close. 返回 (trades DataFrame, equity 序列)."""
     if don_exit is None:
         don_exit = don_n // 2
@@ -166,6 +168,10 @@ def run(df, don_n=48, don_exit=None, adx_min=15, stop_mult=STOP_MULT, lev=LEV, s
                     continue
 
         wnt = want[cl]
+        if allow is not None:
+            a = allow[cl]
+            if a == 0 or (a == 1 and wnt < 0) or (a == -1 and wnt > 0):
+                wnt = 0
         if block and wnt != block_sig:
             block = False
         if pos != 0 and wnt != pos:
